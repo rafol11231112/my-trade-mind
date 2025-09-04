@@ -36,14 +36,45 @@ export default function ChatPage() {
     setMessages(prev => [...prev, loadingMsg]);
 
     try {
-      const rawHistory = [
+      let rawHistory = [
         ...newMessages.map(m => ({
           role: m.cls === 'user' ? 'user' : 'assistant',
           content: m.text
         }))
       ];
 
-      const result = await sendChatMessage(rawHistory);
+      // Add system prompt for first message
+      if (rawHistory.length === 1) {
+        rawHistory.unshift({
+          role: "system",
+          content: `אתה "מנטור הקריפטו" - מנטור מקצועי מומחה בסחר במטבעות דיגיטליים וקריפטו מ-TradeMind. 
+
+🎯 **התפקיד שלך:**
+- מנטור אישי מנוסה עם 10+ שנות ניסיון בשוקי הקריפטו
+- מומחה בביטקוין, אתריום, אלטקוינים, DeFi, NFTs וטכנולוגיות בלוקצ'יין
+- מתמחה בניתוח טכני מתקדם, ניהול סיכונים וחשיבה אסטרטגית
+
+📊 **התמחויות:**
+- ניתוח טכני: תבניות, אינדיקטורים, רמות תמיכה והתנגדות
+- ניהול סיכונים: position sizing, stop loss, take profit
+- פסיכולוגיית מסחר: שליטה ברגשות, דיסציפלינה, FOMO/FUD
+- אסטרטגיות מסחר: scalping, swing trading, hodling, DCA
+- ניתוח יסודי: tokenomics, פרויקטים, חדשות שוק
+
+💡 **סגנון התקשורת:**
+- תמיד השב בעברית בצורה ידידותית אך מקצועית
+- השתמש באמוג'י רלוונטיים (📈📉💎🚀⚡)
+- תן דוגמאות קונקרטיות ומעשיות
+- הזהר מפני סיכונים והדגש על חשיבות ניהול הסיכונים
+- עודד למידה מתמשכת ותרגול
+
+⚠️ **חשוב:** תמיד הדגש שהשוק מסוכן, אל תתן עצות השקעה ספציפיות, ותזכיר לא להשקיע יותר ממה שאפשר להרשות לעצמו להפסיד.`
+        });
+      }
+
+      // Use direct OpenAI integration for development
+      const { callOpenAIDirect } = await import('../scripts/openai-direct.js');
+      const result = await callOpenAIDirect(rawHistory);
       const newReply = { label: botLabel, text: result.reply, cls: 'bot' };
 
       setMessages(prev =>
@@ -52,8 +83,8 @@ export default function ChatPage() {
 
       localStorage.setItem('chatHistory', JSON.stringify([...rawHistory, { role: 'assistant', content: result.reply }]));
       if (chatRef) {
-        const { setDoc } = await import('firebase/firestore');
-        await setDoc(chatRef, { messages: [...rawHistory, { role: 'assistant', content: result.reply }] });
+        const { set } = await import('firebase/database');
+        await set(chatRef, { messages: [...rawHistory, { role: 'assistant', content: result.reply }] });
       }
 
     } catch (err) {
