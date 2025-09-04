@@ -1,8 +1,9 @@
 import "../styles/dashboard.css";
 import React, { useEffect, useState,useRef, } from "react";
 import { translatePage } from "../lang/translations.js";
-import { auth, db } from "../firebase/firebase";
+import { auth, db, realtimeDb } from "../scripts/firebase-init.js";
 import { onAuthStateChanged } from "firebase/auth";
+import { ref, onValue, off } from "firebase/database";
 import TradeModal from "../components/TradeModal";
 import DailyJournalModal from "../components/DailyJournalModal";
 import CalendarWithJournal from "../components/CalendarWithJournal";
@@ -72,7 +73,7 @@ export default function Dashboard() {
     setIsDailyJournalModalOpen(true);
   };
   const currentUserRef = useRef(null); // מחזיק את המשתמש
-  const [statusMessage, setStatusMessage] = useState("טוען...");
+  const [statusMessage] = useState("טוען...");
 
   useEffect(
 () => {
@@ -84,17 +85,22 @@ export default function Dashboard() {
       return;
     }
     setTradesLoading(true);
-    const q = query(
-      collection(db, "userTrades"),
-      where("userId", "==", user.uid),
-      orderBy("timestamp", "desc"),
-      limit(5)
-    );
-    const stop = onSnapshot(
-      q,
-      (snap) => {
+    
+    // Use Realtime Database with user-specific path
+    const tradesRef = ref(realtimeDb, `users/${user.uid}/trades`);
+    const stop = onValue(
+      tradesRef,
+      (snapshot) => {
         const rows = [];
-        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+        if (snapshot.exists()) {
+          const trades = snapshot.val();
+          Object.entries(trades).forEach(([id, trade]) => {
+            rows.push({ id, ...trade });
+          });
+          // Sort by timestamp descending and limit to 5
+          rows.sort((a, b) => new Date(b.timestamp || b.createdAt || 0) - new Date(a.timestamp || a.createdAt || 0));
+          rows.splice(5); // Keep only first 5
+        }
         setTrades(rows);
         setTradesLoading(false);
         setTradesError("");
@@ -106,22 +112,14 @@ export default function Dashboard() {
       }
     );
     // ניקוי מאזין קיים כשמשתמש משתנה
-    return stop;
+    currentUserRef.current = user;
+    return () => off(tradesRef);
   });
   return () => unsub();
 }, []);
 
 
-  // פונקציות עזר (תוכל להוציא לקובץ אחר אם צריך)
-  const initializeUserChat = () => {
-    console.log("🧠 Chat initialized for:", currentUserRef.current?.email);
-    // ... כאן תכניס את הלוגיקה שלך
-  };
-
-  const showLoginMessage = () => {
-    console.warn("🔒 אנא התחבר כדי לשמור את הצ'אט");
-    // ... כאן תוכל להציג מודל או להפעיל redirect
-  };
+  // פונקציות עזר נוספות יכולות להיות כאן בעתיד
 
   useEffect(() => {
     // אפשר לשלב כאן את כל לוגיקת הסקריפטים שייבאת
@@ -444,32 +442,45 @@ export default function Dashboard() {
         if (messagesToSend.length === 1) {
           messagesToSend.unshift({
             role: "system",
-            content: `אתה מנטור מקצועי לסחר במטבעות דיגיטליים מ-TradeMind. תמיד השב בעברית, בצורה ידידותית ומקצועי. תן עצות מותאמות אישית ותעזור למשתמש להשתפר בסחר. אתה מומחה בניתוח טכני, ניהול סיכונים, פסיכולוגיית מסחר ואסטרטגיות מסחר.
-            
-              משתמש: ${currentUser.email}
-              תאריך: ${currentTime.toLocaleDateString("he-IL")}`,
-                        });
-                      }
+            content: `אתה "מנטור הקריפטו" - מנטור מקצועי מומחה בסחר במטבעות דיגיטליים וקריפטו מ-TradeMind. 
+
+🎯 **התפקיד שלך:**
+- מנטור אישי מנוסה עם 10+ שנות ניסיון בשוקי הקריפטו
+- מומחה בביטקוין, אתריום, אלטקוינים, DeFi, NFTs וטכנולוגיות בלוקצ'יין
+- מתמחה בניתוח טכני מתקדם, ניהול סיכונים וחשיבה אסטרטגית
+
+📊 **התמחויות:**
+- ניתוח טכני: תבניות, אינדיקטורים, רמות תמיכה והתנגדות
+- ניהול סיכונים: position sizing, stop loss, take profit
+- פסיכולוגיית מסחר: שליטה ברגשות, דיסציפלינה, FOMO/FUD
+- אסטרטגיות מסחר: scalping, swing trading, hodling, DCA
+- ניתוח יסודי: tokenomics, פרויקטים, חדשות שוק
+
+💡 **סגנון התקשורת:**
+- תמיד השב בעברית בצורה ידידותית אך מקצועית
+- השתמש באמוג'י רלוונטיים (📈📉💎🚀⚡)
+- תן דוגמאות קונקרטיות ומעשיות
+- הזהר מפני סיכונים והדגש על חשיבות ניהול הסיכונים
+- עודד למידה מתמשכת ותרגול
+
+⚠️ **חשוב:** תמיד הדגש שהשוק מסוכן, אל תתן עצות השקעה ספציפיות, ותזכיר לא להשקיע יותר ממה שאפשר להרשות לעצמו להפסיד.
+
+משתמש: ${currentUser.email}
+תאריך: ${currentTime.toLocaleDateString("he-IL")}`,
+          });
+        }
 
         const openAIMessages = messagesToSend.map((msg) => ({
           role: msg.role,
           content: msg.content,
         }));
 
-        const response = await fetch('/api/callOpenAI', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: openAIMessages })
-      });
+        // Import direct OpenAI integration
+        const { callOpenAIDirect } = await import('../scripts/openai-direct.js');
+        const data = await callOpenAIDirect(openAIMessages);
+        const reply = data.reply;
 
-      hideTypingIndicator();
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const reply = data.reply;
+        hideTypingIndicator();
 
         if (reply) {
           const aiMessage = {
