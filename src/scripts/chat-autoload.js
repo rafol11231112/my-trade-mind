@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   doc,
-  getDoc,
-  setDoc
+  getDoc
 } from 'firebase/firestore';
+import { ref, get, set } from 'firebase/database';
 import { onAuthStateChanged } from 'firebase/auth';
-import { db, auth } from "../firebase/firebase-init.js";
+import { db, auth, realtimeDb } from "./firebase-init.js";
 
 
 
@@ -45,44 +45,62 @@ export function useChatAutoload(appendMessage, redirect = '/login') {
         localStorage.setItem('userName', fullName);
         localStorage.setItem('userProfile', JSON.stringify(profile));
 
-        const chatRef = doc(db, 'users', userId, 'chatHistory', 'current');
+        // Use Realtime Database for chat with user-specific path
+        const chatRef = ref(realtimeDb, `users/${userId}/chatRooms/main`);
         setChatRef(chatRef);
 
         let chatHistory = [];
-        const chatSnap = await getDoc(chatRef);
+        const chatSnap = await get(chatRef);
 
         if (chatSnap.exists()) {
-          chatHistory = chatSnap.data().messages || [];
+          const chatData = chatSnap.val();
+          chatHistory = chatData.messages || [];
           chatHistory.forEach((msg) => {
             const label = msg.role === 'user' ? '🟢 אתה' : `🤖 ${mentorName}`;
             appendMessage(label, msg.content, msg.role);
           });
         } else {
-          const context = `המשתמש שלך הוא ${profile.q1 || 'משתמש אנונימי'}.
-הוא סוחר בתדירות של: ${profile.q2 || 'לא ידוע'}.
-התחום שבו הוא הכי חזק הוא: ${profile.q3 || 'לא צוין'}.
-היעד הגדול שלו לשנה הקרובה הוא: ${profile.q4 || 'לא ידוע'}.
-הוא מעדיף לקבל תובנות בצורה של: ${profile.q5 || 'לא נבחר'}.`;
+          const systemPrompt = `אתה "מנטור הקריפטו" - מנטור מקצועי מומחה בסחר במטבעות דיגיטליים וקריפטו מ-TradeMind. 
 
-          chatHistory.push({ role: 'user', content: context });
+🎯 **התפקיד שלך:**
+- מנטור אישי מנוסה עם 10+ שנות ניסיון בשוקי הקריפטו
+- מומחה בביטקוין, אתריום, אלטקוינים, DeFi, NFTs וטכנולוגיות בלוקצ'יין
+- מתמחה בניתוח טכני מתקדם, ניהול סיכונים וחשיבה אסטרטגית
 
-          const idToken = await user.getIdToken();
-          const res = await fetch('/chat', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${idToken}`
-            },
-            body: JSON.stringify({ messages: chatHistory })
-          });
+📊 **התמחויות:**
+- ניתוח טכני: תבניות, אינדיקטורים, רמות תמיכה והתנגדות
+- ניהול סיכונים: position sizing, stop loss, take profit
+- פסיכולוגיית מסחר: שליטה ברגשות, דיסציפלינה, FOMO/FUD
+- אסטרטגיות מסחר: scalping, swing trading, hodling, DCA
+- ניתוח יסודי: tokenomics, פרויקטים, חדשות שוק
 
-          if (!res.ok) throw new Error(`שגיאת שרת: ${res.status}`);
+💡 **סגנון התקשורת:**
+- תמיד השב בעברית בצורה ידידותית אך מקצועית
+- השתמש באמוג'י רלוונטיים (📈📉💎🚀⚡)
+- תן דוגמאות קונקרטיות ומעשיות
+- הזהר מפני סיכונים והדגש על חשיבות ניהול הסיכונים
+- עודד למידה מתמשכת ותרגול
 
-          const resData = await res.json();
+⚠️ **חשוב:** תמיד הדגש שהשוק מסוכן, אל תתן עצות השקעה ספציפיות, ותזכיר לא להשקיע יותר ממה שאפשר להרשות לעצמו להפסיד.
+
+**פרופיל המשתמש:**
+- שם: ${profile.q1 || 'משתמש אנונימי'}
+- תדירות סחר: ${profile.q2 || 'לא ידוע'}
+- נקודת חוזק: ${profile.q3 || 'לא צוין'}
+- יעד לשנה הקרובה: ${profile.q4 || 'לא ידוע'}
+- סגנון למידה מועדף: ${profile.q5 || 'לא נבחר'}
+
+התחל עם הודעת ברכה אישית וחמה שמציגה את עצמך כמנטור הקריפטו ושואל איך אתה יכול לעזור היום.`;
+
+          chatHistory.push({ role: 'system', content: systemPrompt });
+
+          // Use direct OpenAI integration for development
+          const { callOpenAIDirect } = await import('./openai-direct.js');
+          const resData = await callOpenAIDirect(chatHistory);
           const reply = resData.reply || '⚠️ לא התקבלה תשובה מהשרת';
           chatHistory.push({ role: 'assistant', content: reply });
           appendMessage(`🤖 ${mentorName}`, reply, 'bot');
-          await setDoc(chatRef, { messages: chatHistory });
+          await set(chatRef, { messages: chatHistory });
         }
 
         localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
